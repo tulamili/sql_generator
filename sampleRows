@@ -1,0 +1,103 @@
+#!/usr/bin/perl
+use 5.001 ; use strict ; use warnings ; 
+use Getopt::Std ; getopts 'ac:r:t:vw:$:/' , \my%o ; 
+use Term::ANSIColor qw[ :constants ] ; $Term::ANSIColor::AUTORESET = 1 ; 
+
+sub main ( ) ;
+#$o{r} //= 0.1 ; # 抽出する割合
+#$o{c} //= 15 ; # 何個を目標に抽出するか。この値から割合を計算するが、実際の個数は二項分布に従って揺らぐ。
+$o{'$'} //= 'randvalue' ; # 乱数を格納する列の名前
+$o{w} = "abs($o{w})" if exists $o{w} && $o{a} ;
+
+main ( ) ; 
+exit 0 ; 
+ 
+sub vivid { $_[0]//='' ; print STDERR CYAN "SQL sentence $_[0]\n" ; print STDERR RESET } 
+
+# テーブル名を与えて、SQL 文を出力する。
+sub genSQL ( $ ) { 
+	my $outcol = ! $o{v} ? '*' : "* , $o{'$'} * (select count(*) from $_[0] ) , '$_[0]'" ; # SQL で出力する列
+	$outcol = "* , $o{'$'} / $o{w} * (select sum($o{w}) from $_[0] ) , '$_[0]'" if $o{v} && exists $o{w} ; 
+	#my $outcol = ! $o{v} ? '*' : "* , $o{'$'} * (select count(*) from $_[0] ) , '$_[0]'" ; # SQL で出力する列
+	my $fPhrase = "(select *, rand(cast(newid() as varbinary)) $o{'$'} from $_[0]) T" ; # テーブル
+	my $oPhrase = $o{'/'} ? " order by $o{'$'}" . ( exists $o{w} ? " / $o{w}" : '') : '' ; 
+
+	if ( $o{c} ) { 
+		my $threshold = "1.0 * $o{c} " . ( exists $o{w} ?  "* $o{w} / (select sum($o{w})" : '/ (select count(*)'  ). " from $_[0] )" ; 
+		return qq[select $outcol from $fPhrase where $o{'$'} < $threshold$oPhrase ;\n] 
+	} elsif ( exists $o{r} ) { 
+		my $threshold = exists $o{w} ?  "$o{r} * $o{w}" : "$o{r}" ; 
+	 	return  qq[select $outcol from $fPhrase where $o{'$'} < $threshold$oPhrase ;\n] 
+	} else { 
+		print STDERR BRIGHT_RED qq[Specify "-r ratio" or "-c target_item_number".\n] ; 
+		exit 1 ; 
+	}
+}
+
+sub message1 { 
+	print STDERR RED "Unless specifying the table name by -o option, provide table names input stream..\n" ; 
+	$SIG{ALRM} = sub { print genSQL "[!table_name!]" ; exit 0 } ; 
+	alarm 5 ; 
+}
+
+sub main ( ) { 
+
+	if ( defined $o{t} ) { 
+		print genSQL ( $o{t} ) 
+	} else { 
+		$SIG{ALRM} = 'message1' ; 
+		alarm 1 ; 
+		my $flag = 0 ; # 次のループで最初の反復であることを示す変数。
+		while ( <> ) { 
+			vivid 'begin ;' if $flag == 0 ;
+			alarm 0 ;
+			$flag = 1 ; 
+			chomp ; 
+			$_ = [ split /\t/ , $_ , 2 ] -> [0] ; 
+			print genSQL $_ ;
+		}
+		vivid 'end ;' ; 
+ 
+	}
+}
+
+
+#srand ( $o{s}//=do{my($g1,$g2,$r)=(time,$$,65536);((($g1%$r)*19753+($g2%$r)*21397)%$r)*$r+((($g1>>16)*29833+($g2>>16)*31727)%$r)} ) ;
+
+sub VERSION_MESSAGE {}
+sub HELP_MESSAGE {
+    use FindBin qw[ $Script ] ; 
+    $ARGV[1] //= '' ;
+    open my $FH , '<' , $0 ;
+    while(<$FH>){
+        s/\$0/$Script/g ;
+        print $_ if s/^=head1// .. s/^=cut// and $ARGV[1] =~ /^o(p(t(i(o(ns?)?)?)?)?)?$/i ? m/^\s+\-/ : 1;
+    }
+    close $FH ;
+    exit 0 ;
+}
+=encoding utf8
+
+=head1
+  SQL Server (SQL Server 2008 で動作確認) でオプション -t により指定したテーブルに対して,
+  ある割合もしくは、ある件数を目標とする 無作為抽出を行う SQL 文を生成する。 
+
+
+ オプション : 
+   --help : このコマンド $0 に対するオンラインマニュアルを出力する。コマンドラインで $0 --help と入力する。
+   --help opt : このコマンド $0 のコマンドラインオプションのみの解説を出力。(マニュアルの各行から-で始まるもののみ表示)
+  
+   -c 目標個数 ; ただし、二項分布に従って,目標個数からは揺らぐ。
+   -r 抽出割合 ; 0 から 1までの数。
+   -t テーブル名 ; 
+
+   -$ 乱数列名 ;
+
+   -w 列名 ; 重み付き抽出をする。列名を参照して、その値に比例した確率で抽出がされるようにする。もしも、-r があれば、それに単純に掛けた数が抽出確率となる。
+   -a ; -w による重み付き抽出において、マイナスの値はプラスにする(絶対値をとる)
+
+   -v ; 乱数に対して、テーブルの行数を掛けた値、及び、テーブル名を出力。ただの乱数だと0に近い数しか現れない弊害を軽減させ、0から目標抽出個数の一様分布を為す乱数に近い数が生成される。
+   -/ ; order by .. を追加。確実にシャッフルさせる効果がある。
+
+=cut 
+
