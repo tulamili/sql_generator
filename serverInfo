@@ -1,0 +1,35 @@
+#!/usr/bin/perl
+
+use 5.001 ; use strict ; use warnings ; 
+use Getopt::Std ; getopts ' ', \my %o ; 
+
+print "select \@\@version as 'SQL Server Version' ;\n" ;
+
+
+sub VERSION_MESSAGE {}
+sub HELP_MESSAGE {
+    use FindBin qw[ $Script ] ; 
+    $ARGV[1] //= '' ;
+    open my $FH , '<' , $0 ;
+    while(<$FH>){
+        s/\$0/$Script/g ;
+        print $_ if s/^=head1// .. s/^=cut// and $ARGV[1] =~ /^o(p(t(i(o(ns?)?)?)?)?)?$/i ? m/^\s+\-/ : 1;
+    }
+    close $FH ;
+    exit 0 ;
+}
+
+=encoding utf8
+
+=head1
+  
+  SQL Server のバージョン情報を得るための SQL 文を生成する。
+
+  使い方 : 
+     $0  # SQL文 select @@version as 'SQL Server Version' が生成される。 
+
+  オプション: 
+   --help : このコマンド $0 に対するオンラインマニュアルを出力する。コマンドラインで $0 --help と入力する。
+   --help opt : このコマンド $0 のコマンドラインオプションのみの解説を出力。(マニュアルの各行から-で始まるもののみ表示)
+
+=cut 
