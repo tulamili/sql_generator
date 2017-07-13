@@ -1,0 +1,68 @@
+#!/usr/bin/perl
+
+use 5.001 ; use strict ; use warnings ; 
+use Getopt::Std ; getopts 'f:i:ru' , \my %o ; 
+use Term::ANSIColor qw[ :constants ] ; $Term::ANSIColor::AUTORESET = 1 ; 
+use Encode qw[ encode_utf8 decode_utf8 ] ; 
+
+$o{f} //= 45 ; # 何文字目で折るか
+$o{i} //= 5 ; # 折った場合に何文字の空白文字を先頭に入れるか
+ 
+binmode STDOUT , ':utf8'   if $o{u} ; # binmode に if 文はうまくいくのか? 
+
+while ( <> ) { 
+
+  $_ = decode_utf8 ($_) if $o{u} ;
+
+  while ( $_ ) { 
+    if ( length $_ <= $o{f} ) { 
+      print $_ ; # if $_ ne "\n" ;
+      last ; 
+    }
+    print substr ( $_ , 0 , $o{f} ) , "\n" ; 
+    $_ = ' ' x $o{i} . substr ( $_ , $o{f} ) ;
+    if  ( ! $o{r} ) {
+      print $_ ; 
+      last ;
+    } 
+  }
+}
+
+
+
+sub VERSION_MESSAGE {}
+sub HELP_MESSAGE {
+    use FindBin qw[ $Script ] ; 
+    $ARGV[1] //= '' ;
+    open my $FH , '<' , $0 ;
+    while(<$FH>){
+        s/\$0/$Script/g ;
+        print $_ if s/^=head1// .. s/^=cut// and $ARGV[1] =~ /^o(p(t(i(o(ns?)?)?)?)?)?$/i ? m/^\s+\-/ : 1;
+    }
+    close $FH ;
+    exit 0 ;
+}
+
+=encoding utf8
+
+=head1
+
+  入力からテキストを読みとり、-f で指定される文字数で改行される。
+  改行された場合は、先頭に -i で指定される文字数の空白文字を挿入する。
+
+ オプション :
+
+   --help : このコマンド $0 に対するオンラインマニュアルを出力する。コマンドラインで $0 --help と入力する。
+   --help opt : このコマンド $0 のコマンドラインオプションのみの解説を出力。(マニュアルの各行から-で始まるもののみ表示)
+  
+   -f num : 何文字で折りたたむか(改行するか)
+   -i num : 何個の空白文字を、改行された文字列の先頭に挿入するか。
+   -r ; 2行で納まらない場合にさらに改行を順次いれて行くか? 
+
+   -u ; UTF-8 であることの指定。
+ 
+  開発メモ : 
+    * 折りたたんだときに、改行文字のみが残っていた場合に、うまく処理できているだろうか? 
+    * Text::VisualWidth::PP を使ってみたい。
+=cut 
+
