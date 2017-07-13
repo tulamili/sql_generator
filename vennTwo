@@ -1,0 +1,67 @@
+#!/usr/bin/perl 
+
+use 5.001 ; use strict ; use warnings ; 
+use Getopt::Std ; getopts '1' , \my%o ; 
+use Term::ANSIColor qw[ :constants ] ; $Term::ANSIColor::AUTORESET = 1 ;
+use FindBin qw[ $Script ] ; 
+
+sub vivid { $_[0]//='' ; print STDERR CYAN "SQL sentence: $_[0]\n" } 
+
+if ( @ARGV != 4 ) { print STDERR YELLOW "4 arguments should be given such as : $Script TableA ColumnA TableB ColumnB\n"  ; exit 1 }  
+
+my ($v1,$v2,$v3,$v4) = @ARGV ; 
+my $d = defined $o{1} ? '' : 'distinct ' ; 
+vivid ;
+
+print 
+qq[/* Venn diagram between $v1($v2) and $v3($v4) */
+select 
+	i10, i11, i01 
+from 
+	(select count(${d}I10) i10 from (select $v2 I10 from $v1 except select $v4 I10 from $v3) T) T10 , 
+	(select count(${d}I11) i11 from (select $v2 I11 from $v1 intersect select $v4 I11 from $v3) T) T11 , 
+	(select count(${d}I01) i01 from (select $v4 I01 from $v3 except select $v2 I01 from $v1) T) T01  ;
+
+/* AB = 10 */  
+select count(${d}I10) i10 from (select $v2 I10 from $v1 except select $v4 I10 from $v3) T ;
+/* AB = 11 */ 
+select count(${d}I11) i11 from (select $v2 I11 from $v1 intersect select $v4 I11 from $v3) T ; 
+/* AB = 01 */ 
+select count(${d}I01) i01 from (select $v4 I01 from $v3 except select $v2 I01 from $v1) T ;
+];
+
+vivid 'end' ;
+
+sub VERSION_MESSAGE {}
+sub HELP_MESSAGE {
+    use FindBin qw[ $Script ] ; 
+    $ARGV[1] //= '' ;
+    open my $FH , '<' , $0 ;
+    while(<$FH>){
+        s/\$0/$Script/g ;
+        print $_ if s/^=head1// .. s/^=cut// and $ARGV[1] =~ /^o(p(t(i(o(ns?)?)?)?)?)?$/i ? m/^\s+\-/ : 1;
+    }
+    close $FH ;
+    exit 0 ;
+}
+
+=encoding utf8
+
+=head1
+  
+  $0 テーブル名A 列名a テーブル名B 列名b
+    テーブルAの列aの値の集合と テーブルBの列bの値の集合に
+    対して、ベン図を描いた場合の、3個の小領域の(異なる)要素の個数を
+    出力する、SQL文を出力する。
+
+ オプション : 
+   --help : このコマンド $0 に対するオンラインマニュアルを出力する。コマンドラインで $0 --help と入力する。
+   --help opt : このコマンド $0 のコマンドラインオプションのみの解説を出力。(マニュアルの各行から-で始まるもののみ表示)
+  
+   -1  : SQL文内のcount関数の中に distinct を付加しない。与えられたテーブルで disinct の処理がされていると仮定する。このことで計算の高速化を見込まれる。
+
+ 開発上のメモ:
+   * SQL文を3個走らせるため、処理時間が長くなるので、手でこのプログラム$0が出力したSQL文を手で加工する必要がある。どうしたらよいだろうか?
+
+=cut 
+
