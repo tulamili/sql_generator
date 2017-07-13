@@ -1,0 +1,76 @@
+#!/usr/bin/perl
+use 5.001; use strict ; use warnings ; 
+use Getopt::Std ; getopts ':m:pt:' , \my%o ; 
+use Term::ANSIColor qw[ :constants ] ; $Term::ANSIColor::AUTORESET = 1 ; 
+use Encode qw[ decode_utf8 ] ;
+
+$o{t} //= '#0' ; # 作られる(一時)テーブルの名称
+$o{m} //= 5 ; # テーブルの各値は、最長何文字とするか。
+sub vivid { $_[0]//='' ; print STDERR CYAN "SQL sentence: $_[0]\n" } 
+
+
+$SIG{ALRM} = sub { print STDERR RED "Input of list of pairs of 'table(tab)column' is required..\n" if -t } ; 
+alarm 2 ; 
+
+my $w = 0 ; # 列数
+my @fw ; # 各列の長さの最大値を格納。
+my @v = () ; # 作成する新しいテーブルの各行の 値が入る。
+my $out = '' ; # 生成される SQL文 
+my $n = 0 ; # 連番
+
+while ( <> ) {
+  chomp ; 
+  my @F = split /\t/ , $_  ; 
+  $w = @F > $w ? @F : $w ; # 列数の最大値を格納。
+  for ( 0 .. $#F ) { my $t = length(decode_utf8 $F[$_]) ; $fw[$_] = $t if ! defined $fw[$_] || $t > $fw[$_] } ;  
+  unshift @F , ++$n if $o{':'} ; 
+  push @v , [@F] ; 
+}
+
+$b = $o{':'} ? 0 : 1 ; # v で始める列名について、その番号を何番から始めるか。連番を入れるときにのみ 0 とする。
+
+$out .= "create table $o{t} (".(join',',map{$_==0?"v0 int":"v$_ nvarchar(".($o{m}+shift@fw).")"}$b..$w).");\n"; #テーブルを作る
+$out .= "insert into $o{t} values (" . join(',', map{"N'$_'"}@{$_}) . ");\n" for @v ; 
+$out .= "select * from $o{t} order by v$b ;\n" if $o{p} ; 
+
+vivid ;
+print $out ; 
+vivid 'end' ;
+exit 0 ; 
+
+sub VERSION_MESSAGE {}
+sub HELP_MESSAGE {
+    use FindBin qw[ $Script ] ; 
+    $ARGV[1] //= '' ;
+    open my $FH , '<' , $0 ;
+    while(<$FH>){
+        s/\$0/$Script/g ;
+        print $_ if s/^=head1// .. s/^=cut// and $ARGV[1] =~ /^o(p(t(i(o(ns?)?)?)?)?)?$/i ? m/^\s+\-/ : 1;
+    }
+    close $FH ;
+    exit 0 ;
+}
+
+=encoding utf8
+
+=head1
+  
+  タブ文字区切りのtsvデータを読み取り、同じテーブルを作る
+  SQL文を出力する。
+
+ オプション : 
+
+  --help : このコマンド $0 に対するオンラインマニュアルを出力する。コマンドラインで $0 --help と入力する。
+  --help opt : このコマンド $0 のコマンドラインオプションのみの解説を出力。(マニュアルの各行から-で始まるもののみ表示)
+  
+  -t tablename ; 元となるテーブル名を指定する。
+  -m num ; 文字列の長さに余裕をだれだけ増やすか。
+  -p ; 最後に select * from #0 order by b.. を実行するようにする SQL文を付加。
+  -: ; テーブルの各行に連番を挿入する。
+
+ 開発上のメモ:
+   * insert into 文は、ひとつにまとめると、うまくいかなかったので、行毎に分割した。
+   * 連番の整数についても、Nプレフィックスを付加しているが、SQL Server のバージョンによってはエラーとなるから、付けないようにしたい。 
+
+=cut 
+
