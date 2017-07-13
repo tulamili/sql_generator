@@ -1,0 +1,132 @@
+#!/usr/bin/perl
+use 5.006; # 5.001 にしたいという考えもあったが、 Time::Local を使いたいため、5.006 とした。
+use strict ; 
+use warnings ; 
+use Getopt::Std ; getopts 'ls:tx:' , \my%o ; 
+use Term::ANSIColor qw[ :constants ] ; $Term::ANSIColor::AUTORESET = 1 ; 
+
+# 変数の宣言
+my @T = () ; # 対象となるテーブルのリスト
+my $hex = '' ; # -x が指定されて、SQL文中で newid() の先頭文字に対してフィルタリングをする場合の,先頭文字列の指定
+
+main () ; 
+exit ; 
+
+sub vivid { $_[0]//='' ; print STDERR CYAN "SQL sentence: $_[0]\n" } 
+
+# like句中のフィルター用の文字列の生成。 SQL Server 2008 に合わせて作られている。
+sub gen_hex ( $ ) {
+	my $res = join '', map{ [split//,'0123456789ABCDEF']->[int rand 16] } 1.. ( $_[0] >32 ? 32 : $_[0] ) ;
+	$res = join '-', grep {$_} split /(....)/, $res , 6 ;
+	$res =~ s/\-// ; 
+	return $res ; 
+}
+
+# テーブル名の一覧を取り出す SQL 文を生成。
+sub main_listup0 ( ) { 
+	print CYAN "#1:\t" ; 
+	print "select distinct table_name from information_schema.columns order by table_name ; /* 1 column output */\n" ;
+	print CYAN "#2:\t" ; 
+	print "select * from information_schema.tables order by table_name ; /* 4 columns output */\n" ;
+	print CYAN "#3:\t" ; 
+	print "select name from sysobjects where xtype = 'U' order by name ; /* 1 column output*/\n" ;
+}
+
+# 各テーブルの件数を取り出す 最も簡単に近い SQL文を生成
+sub main_simplecount ( ) { 
+	vivid ;
+	my @sql  ;  
+	for ( 0 .. $#T ) { 
+		my $TABLE = ! $o{x} ? $T[$_] : qq[(select * from $T[$_] where newid() like '$hex%') T] ; 
+		push @sql , qq[(select '$T[$_]' table_name, count (\*) items_number from $TABLE)]  ; 
+	}
+	print join ( " union\n" ,@sql ),  "\norder by table_name\n" ; 
+	vivid ("end") ;
+}
+
+# 各テーブルの件数を取り出すSQL文を生成。算出秒数や計算開始時刻も表示する。
+sub main_timeMinute ( ) { 
+	my $offset = do { use Time::Local ; my $n=time(); timegm localtime $n - timegm gmtime $n } ; # 世界標準時からの時差を秒数で獲得
+	my $out .= defined $o{x} ? qq[/* like-phase length = $o{x} */ ] : ''; 
+	$out .= qq[ declare \@t0 datetime ; ] ;
+	$out .= qq[ declare \@tn varchar(20) ; ] ;
+	$out .= qq[ create table #tablelines ( id int, table_name varchar(20), lines bigint, seconds numeric(18,3), timestamp_refstart datetime ) ; \n] ; 
+
+	for (0..$#T) { 
+		my $id = $_ + 1 ; 
+		my $TABLE = ! $o{x} ? $T[$_] : qq[(select * from $T[$_] where newid() like '$hex%') T] ; 
+		$out .= qq[/* TBL$id */ set \@t0 = sysdatetime () ; set \@tn = '$T[$_]' ;] ; 
+		$out .= qq[insert into #tablelines select $id,\@tn,count(*),-54325432, dateadd(second,$offset,\@t0) from $TABLE ;] ; 
+		$out .= qq[update #tablelines set seconds = (datediff(millisecond,\@t0,sysdatetime()))/1e3 where id = '$id' ;] ;
+		$out .= "\n" ;
+	}
+
+	#$out .= qq[/* summarizes into output */ ] ; 
+	$out .= qq[select id,table_name,lines,lines/1e6 [lines/1e6],seconds, timestamp_refstart from #tablelines order by id ; ]; 
+	$out .= qq[\n drop table #tablelines; \n] ; 
+
+	$out =~ s/^\s+//mg ; 
+	return $out ;
+}	
+
+## メイン
+sub main { 
+	# 乱数シードの設定
+	srand ( $o{s}//=do{my($g1,$g2,$r)=(time,$$,65536);((($g1%$r)*19753+($g2%$r)*21397)%$r)*$r+((($g1>>16)*29833+($g2>>16)*31727)%$r)} ) ;
+	$hex = gen_hex ( $o{x} ) if $o{x} ;
+	# -l が指定されていた場合。テーブルリストを取り出すための短いSQL文を出力してすぐ終了。
+	if ( $o{l} ) { vivid BRIGHT_CYAN "Try each of the following:" ; main_listup0 ; exit 0 } ; 
+
+	# 標準入力の読取り
+	$SIG{ALRM} = sub { print STDERR RED "Input of list of tables is required.. (You can stop this program by Ctrl+C.)\n" if -t } ; 
+	alarm 2 ; 
+	while ( <> ) { chomp ; next if m/^\s*$/ ; push @T , $_ }  
+
+	# -t が指定されているかどうかで場合分け
+	if ( defined $o{t} )  {	vivid ; print main_timeMinute ; vivid ('end') }
+	else { 	main_simplecount ( ) } 
+
+	# -xがあった場合は シード情報などを出力して終了
+	print STDERR CYAN qq[Used random seed : $o{s} ; Generated constraining string: "where newid() like '$hex%'"\n] if $o{x}  ;
+}
+
+sub VERSION_MESSAGE {}
+sub HELP_MESSAGE {
+    use FindBin qw[ $Script ] ; 
+    $ARGV[1] //= '' ;
+    open my $FH , '<' , $0 ;
+    while(<$FH>){
+        s/\$0/$Script/g ;
+        print $_ if s/^=head1// .. s/^=cut// and $ARGV[1] =~ /^o(p(t(i(o(ns?)?)?)?)?)?$/i ? m/^\s+\-/ : 1;
+    }
+    close $FH ;
+    exit 0 ;
+}
+
+=encoding utf8
+
+=head1
+
+ テーブル名の一覧を改行文字区切りで標準入力から受取って、
+ それらのテーブルの行数(件数)を出力するSQL文を標準出力に出力する。
+
+ いくつかの動作モード : 
+    $0 -l                  # テーブルの一覧を出力させるSQL文を出力する。
+    $0 < tableList         # テーブル名を改行区切りで与えると、各テーブルの行数を(簡便に)出力するSQL文を出力する。
+    $0 -x 5 < tableList    # 各テーブルの、各行においてnewid()の先頭5文字(ランダムに)をlike句で指定して、行数算出するSQL文を出力する。
+    $0 -t < tableList      # 算出にかかる秒数やテーブル参照開始時刻などを出力するSQL文を出力する。
+    $0 -t -x 5 < tableList # 上記に加え、 -x 5 の機能を追加した動作をする。
+
+ オプション :
+
+   --help : このコマンド $0 に対するオンラインマニュアルを出力する。コマンドラインで $0 --help と入力する。
+   --help opt : このコマンド $0 のコマンドラインオプションのみの解説を出力。(マニュアルの各行から-で始まるもののみ表示)
+  
+   -l ; テーブル名の一覧を取得する SQL文を生成する。(list up tables) 
+   -t ; 各テーブルについての算出秒数,参照開始時刻を出力するようにする。(timestamp)
+
+   -x num ; 各テーブルについて、全行のうち各行を(1/16)^numの確率で抽出して、その行数を数えるSQL文を抽出する。32以上なら32と見なす。(heX)
+   -s num ; ランダムな動作をする場合のシードの設定。(seed)
+
+=cut 
+
